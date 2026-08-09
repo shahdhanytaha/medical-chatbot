@@ -4,8 +4,15 @@ from typing import TypedDict
 from dotenv import load_dotenv
 
 from langchain_groq import ChatGroq
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
 from langgraph.graph import StateGraph, START, END
 
+
+# =====================================
+# Environment
+# =====================================
 
 load_dotenv()
 
@@ -15,6 +22,10 @@ if not api_key:
     raise ValueError("GROQ_API_KEY is missing.")
 
 
+# =====================================
+# LLM
+# =====================================
+
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0,
@@ -22,45 +33,75 @@ llm = ChatGroq(
 )
 
 
+# =====================================
+# State
+# =====================================
+
 class AgentState(TypedDict):
     question: str
     context: str
-    history: str
     report: str
     route: str
     answer: str
 
 
-# ==========================================
+# =====================================
 # Supervisor Agent
-# ==========================================
+# =====================================
 
-def supervisor_agent(state):
+def supervisor_agent(state: AgentState):
 
-    question = state["question"]
+    question = state["question"].strip()
+
+    # -----------------------------
+    # Greeting detection
+    # -----------------------------
+
+    greeting_words = {
+        "hi",
+        "hello",
+        "hey",
+        "hey there",
+        "good morning",
+        "good afternoon",
+        "good evening"
+    }
+
+    if question.lower() in greeting_words:
+
+        return {
+            "route": "GREETING"
+        }
+
+    # -----------------------------
+    # Supervisor prompt
+    # -----------------------------
 
     prompt = f"""
-You are the supervisor of a medical AI system.
+You are a supervisor for a medical AI system.
 
-Decide which agent should handle the request.
+Decide which agent should handle the user request.
 
-Choose ONLY:
+Choose ONLY one:
 
 RAG
-
-or
-
 SUMMARY
 
-Use RAG for medical knowledge questions.
+Use RAG when the user asks a medical knowledge question.
 
-Use SUMMARY for requests to summarize,
+Use SUMMARY when the user asks to summarize,
 analyze, or explain a medical report.
 
 User request:
 {question}
 
-Return ONLY RAG or SUMMARY.
+Return ONLY:
+
+RAG
+
+or:
+
+SUMMARY
 """
 
     result = llm.invoke(prompt)
@@ -77,18 +118,49 @@ Return ONLY RAG or SUMMARY.
     }
 
 
-# ==========================================
+# =====================================
 # RAG Agent
-# ==========================================
+# =====================================
 
-def rag_agent(state):
+def rag_agent(state: AgentState):
 
-    from chatbot import ask_medical_question
-
+    context = state["context"]
     question = state["question"]
 
-    answer, sources = ask_medical_question(
-        question
+    prompt = PromptTemplate(
+        input_variables=[
+            "context",
+            "question"
+        ],
+
+        template="""
+You are a Medical RAG Agent.
+
+Answer ONLY using the provided medical context.
+
+Do not invent information.
+
+If the answer is not found in the context, say:
+
+"I don't have enough information in my medical database."
+
+Medical Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
+    )
+
+    chain = prompt | llm | StrOutputParser()
+
+    answer = chain.invoke(
+        {
+            "context": context,
+            "question": question
+        }
     )
 
     return {
@@ -96,43 +168,92 @@ def rag_agent(state):
     }
 
 
-# ==========================================
-# Summary Agent
-# ==========================================
+# =====================================
+# Summarizer Agent
+# =====================================
 
-def summary_agent(state):
-
-    from summarizer import summarize_report
+def summarizer_agent(state: AgentState):
 
     report = state["report"]
 
-    answer = summarize_report(
-        report
-    )
+    if not report.strip():
+
+        return {
+            "answer": "The uploaded report does not contain readable text."
+        }
+
+    prompt = """
+You are a Medical Report Summarizer Agent.
+
+Summarize ONLY the information contained
+in the medical report.
+
+Do not diagnose the patient.
+
+Do not invent information.
+
+Organize the response into:
+
+## Summary
+
+## Key Findings
+
+## Important Values
+
+## Medications Mentioned
+
+## Recommendations or Follow-up Mentioned
+
+Medical Report:
+
+""" + report
+
+    result = llm.invoke(prompt)
 
     return {
-        "answer": answer
+        "answer": result.content
     }
 
 
-# ==========================================
-# Router
-# ==========================================
+# =====================================
+# Greeting Agent
+# =====================================
 
-def route_agent(state):
+def greeting_agent(state: AgentState):
+
+    return {
+        "answer": (
+            "Hello! 👋 I am your Medical AI Assistant. "
+            "How can I help you?"
+        )
+    }
+
+
+# =====================================
+# Router
+# =====================================
+
+def route_agent(state: AgentState):
 
     if state["route"] == "SUMMARY":
-        return "summary"
+        return "summarizer"
+
+    if state["route"] == "GREETING":
+        return "greeting"
 
     return "rag"
 
 
-# ==========================================
+# =====================================
 # Build Graph
-# ==========================================
+# =====================================
 
 graph = StateGraph(AgentState)
 
+
+# -----------------------------
+# Add Agents
+# -----------------------------
 
 graph.add_node(
     "supervisor",
@@ -145,10 +266,19 @@ graph.add_node(
 )
 
 graph.add_node(
-    "summary",
-    summary_agent
+    "summarizer",
+    summarizer_agent
 )
 
+graph.add_node(
+    "greeting",
+    greeting_agent
+)
+
+
+# -----------------------------
+# Start
+# -----------------------------
 
 graph.add_edge(
     START,
@@ -156,15 +286,24 @@ graph.add_edge(
 )
 
 
+# -----------------------------
+# Supervisor Routing
+# -----------------------------
+
 graph.add_conditional_edges(
     "supervisor",
     route_agent,
     {
         "rag": "rag",
-        "summary": "summary"
+        "summarizer": "summarizer",
+        "greeting": "greeting"
     }
 )
 
+
+# -----------------------------
+# End
+# -----------------------------
 
 graph.add_edge(
     "rag",
@@ -172,38 +311,41 @@ graph.add_edge(
 )
 
 graph.add_edge(
-    "summary",
+    "summarizer",
+    END
+)
+
+graph.add_edge(
+    "greeting",
     END
 )
 
 
+# =====================================
+# Compile Graph
+# =====================================
+
 agent_graph = graph.compile()
 
 
-# ==========================================
-# Main Function
-# ==========================================
+# =====================================
+# Run Agents
+# =====================================
 
 def run_agents(
     question,
     context="",
-    history="",
     report=""
 ):
 
-    result = agent_graph.invoke({
-
-        "question": question,
-
-        "context": context,
-
-        "history": history,
-
-        "report": report,
-
-        "route": "",
-
-        "answer": ""
-    })
+    result = agent_graph.invoke(
+        {
+            "question": question,
+            "context": context,
+            "report": report,
+            "route": "",
+            "answer": ""
+        }
+    )
 
     return result["answer"]

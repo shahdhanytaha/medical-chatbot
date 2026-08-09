@@ -5,29 +5,22 @@ import streamlit as st
 
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from chatbot import ask_medical_question
 from agents import run_agents
+from rag import retriever, vector_store
 
 
-# =========================================================
+# =====================================
 # Environment
-# =========================================================
+# =====================================
 
 load_dotenv()
 
-api_key = os.getenv("GROQ_API_KEY")
 
-if not api_key:
-    st.error(
-        "GROQ_API_KEY is missing. Please check your .env file."
-    )
-    st.stop()
-
-
-# =========================================================
-# Page Configuration
-# =========================================================
+# =====================================
+# Page Config
+# =====================================
 
 st.set_page_config(
     page_title="Medical AI Chatbot",
@@ -36,9 +29,9 @@ st.set_page_config(
 )
 
 
-# =========================================================
+# =====================================
 # Session State
-# =========================================================
+# =====================================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -46,13 +39,24 @@ if "messages" not in st.session_state:
 if "report_text" not in st.session_state:
     st.session_state.report_text = ""
 
-if "report_id" not in st.session_state:
-    st.session_state.report_id = None
+if "knowledge_loaded" not in st.session_state:
+    st.session_state.knowledge_loaded = set()
 
 
-# =========================================================
+# =====================================
+# Header
+# =====================================
+
+st.title("🩺 Medical AI Chatbot")
+
+st.caption(
+    "Medical RAG • Conversation Memory • Multi-Agent System"
+)
+
+
+# =====================================
 # Sidebar
-# =========================================================
+# =====================================
 
 with st.sidebar:
 
@@ -60,23 +64,24 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # -----------------------------------------------------
-    # Clear Chat
-    # -----------------------------------------------------
 
-    if st.button(
-        "🗑️ Clear Chat",
-        use_container_width=True
-    ):
+    # =================================
+    # Clear Chat
+    # =================================
+
+    if st.button("🗑️ Clear Chat", use_container_width=True):
+
         st.session_state.messages = []
 
         st.rerun()
 
+
     st.markdown("---")
 
-    # -----------------------------------------------------
+
+    # =================================
     # Medical Knowledge PDF
-    # -----------------------------------------------------
+    # =================================
 
     st.subheader("📚 Medical Knowledge PDF")
 
@@ -88,234 +93,166 @@ with st.sidebar:
 
     if knowledge_pdf is not None:
 
-        st.success(
-            f"Selected: {knowledge_pdf.name}"
+        file_id = (
+            knowledge_pdf.name,
+            knowledge_pdf.size
         )
 
-        st.info(
-            "Knowledge PDF upload is available. "
-            "Your existing ChromaDB remains active."
-        )
+        if file_id not in st.session_state.knowledge_loaded:
 
-    st.markdown("---")
-
-    # -----------------------------------------------------
-    # Medical Report
-    # -----------------------------------------------------
-
-    st.subheader("📄 Medical Report")
-
-    uploaded_report = st.file_uploader(
-        "Upload Medical Report",
-        type=["pdf"],
-        key="medical_report"
-    )
-
-    st.markdown("---")
-
-    # -----------------------------------------------------
-    # Agents
-    # -----------------------------------------------------
-
-    st.subheader("🤖 Multi-Agent System")
-
-    st.write("Supervisor Agent")
-    st.write("↳ RAG Agent")
-    st.write("↳ Summary Agent")
-
-
-# =========================================================
-# Medical Report Processing
-# =========================================================
-
-if uploaded_report is not None:
-
-    report_id = (
-        uploaded_report.name,
-        uploaded_report.size
-    )
-
-    # Process only when a new file is uploaded
-    if st.session_state.report_id != report_id:
-
-        temp_path = None
-
-        try:
-
-            with st.spinner(
-                "Reading medical report..."
-            ):
-
-                # -----------------------------------------
-                # Save PDF temporarily
-                # -----------------------------------------
+            try:
 
                 with tempfile.NamedTemporaryFile(
                     delete=False,
                     suffix=".pdf"
-                ) as temp_file:
+                ) as tmp:
 
-                    temp_file.write(
-                        uploaded_report.getbuffer()
+                    tmp.write(
+                        knowledge_pdf.getvalue()
                     )
 
-                    temp_path = temp_file.name
+                    pdf_path = tmp.name
 
-
-                # -----------------------------------------
-                # Load PDF
-                # -----------------------------------------
 
                 loader = PyPDFLoader(
-                    temp_path
+                    pdf_path
                 )
 
                 documents = loader.load()
 
 
-                # -----------------------------------------
-                # Extract text
-                # -----------------------------------------
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=500,
+                    chunk_overlap=100
+                )
 
-                report_pages = []
-
-                for doc in documents:
-
-                    text = doc.page_content.strip()
-
-                    if text:
-                        report_pages.append(text)
-
-
-                report_text = "\n\n".join(
-                    report_pages
+                chunks = splitter.split_documents(
+                    documents
                 )
 
 
-                # -----------------------------------------
-                # Save report
-                # -----------------------------------------
-
-                if report_text:
-
-                    st.session_state.report_text = (
-                        report_text
-                    )
-
-                    st.session_state.report_id = (
-                        report_id
-                    )
-
-                    st.sidebar.success(
-                        "✅ Medical report loaded!"
-                    )
-
-                else:
-
-                    st.session_state.report_text = ""
-
-                    st.sidebar.warning(
-                        "⚠️ This PDF contains no readable text."
-                    )
-
-
-        except Exception as e:
-
-            st.sidebar.error(
-                f"Report error: {e}"
-            )
-
-
-        finally:
-
-            if (
-                temp_path
-                and os.path.exists(temp_path)
-            ):
-
-                os.remove(temp_path)
-
-
-# =========================================================
-# Main Header
-# =========================================================
-
-st.title("🩺 Medical AI Chatbot")
-
-st.caption(
-    "Medical RAG • Conversation Memory • Multi-Agent System"
-)
-
-
-# =========================================================
-# Medical Report Section
-# =========================================================
-
-if st.session_state.report_text:
-
-    st.markdown("---")
-
-    st.header("📄 Uploaded Medical Report")
-
-    with st.expander(
-        "View report"
-    ):
-
-        st.text(
-            st.session_state.report_text
-        )
-
-
-    # -----------------------------------------------------
-    # Summary Button
-    # -----------------------------------------------------
-
-    if st.button(
-        "✨ Summarize Medical Report",
-        use_container_width=True
-    ):
-
-        with st.spinner(
-            "Supervisor Agent → Summary Agent..."
-        ):
-
-            try:
-
-                summary = run_agents(
-
-                    question=(
-                        "Summarize this medical report"
-                    ),
-
-                    context="",
-
-                    history="",
-
-                    report=(
-                        st.session_state.report_text
-                    )
+                vector_store.add_documents(
+                    chunks
                 )
 
 
-                st.subheader(
-                    "📋 Medical Report Summary"
+                st.session_state.knowledge_loaded.add(
+                    file_id
                 )
 
-                st.markdown(
-                    summary
+
+                st.success(
+                    f"✅ {knowledge_pdf.name} added to medical database."
                 )
 
 
             except Exception as e:
 
                 st.error(
-                    f"Summary error: {e}"
+                    f"Error loading PDF: {e}"
                 )
 
 
-# =========================================================
-# Display Previous Messages
-# =========================================================
+    st.caption("200MB per file • PDF")
+
+
+    st.markdown("---")
+
+
+    # =================================
+    # Medical Report
+    # =================================
+
+    st.subheader("📄 Medical Report")
+
+    report_pdf = st.file_uploader(
+        "Upload Medical Report",
+        type=["pdf"],
+        key="report_pdf"
+    )
+
+
+    if report_pdf is not None:
+
+        try:
+
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".pdf"
+            ) as tmp:
+
+                tmp.write(
+                    report_pdf.getvalue()
+                )
+
+                report_path = tmp.name
+
+
+            loader = PyPDFLoader(
+                report_path
+            )
+
+            report_documents = loader.load()
+
+
+            st.session_state.report_text = "\n\n".join(
+                doc.page_content
+                for doc in report_documents
+            )
+
+
+            st.success(
+                "✅ Medical report uploaded."
+            )
+
+
+        except Exception as e:
+
+            st.error(
+                f"Error reading report: {e}"
+            )
+
+
+    st.caption("200MB per file • PDF")
+
+
+    # =================================
+    # Summarize Report
+    # =================================
+
+    if st.session_state.report_text:
+
+        if st.button(
+            "📋 Summarize Medical Report",
+            use_container_width=True
+        ):
+
+            with st.spinner(
+                "Analyzing medical report..."
+            ):
+
+                summary = run_agents(
+                    question="Summarize this medical report",
+                    context="",
+                    report=st.session_state.report_text
+                )
+
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": summary,
+                    "sources": []
+                }
+            )
+
+
+            st.rerun()
+
+
+# =====================================
+# Display Chat History
+# =====================================
 
 for message in st.session_state.messages:
 
@@ -327,15 +264,10 @@ for message in st.session_state.messages:
             message["content"]
         )
 
-        # Show sources for assistant messages
-        if (
-            message["role"] == "assistant"
-            and message.get("sources")
-        ):
 
-            with st.expander(
-                "📚 Sources"
-            ):
+        if message.get("sources"):
+
+            with st.expander("📚 Sources"):
 
                 for source in message["sources"]:
 
@@ -344,24 +276,29 @@ for message in st.session_state.messages:
                     )
 
 
-# =========================================================
+# =====================================
 # Chat Input
-# =========================================================
+# =====================================
 
 question = st.chat_input(
     "Ask a medical question..."
 )
 
 
-# =========================================================
-# Handle User Question
-# =========================================================
-
 if question:
 
-    # -----------------------------------------------------
+    # =================================
     # Show User Message
-    # -----------------------------------------------------
+    # =================================
+
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": question,
+            "sources": []
+        }
+    )
+
 
     with st.chat_message("user"):
 
@@ -370,96 +307,99 @@ if question:
         )
 
 
-    # -----------------------------------------------------
-    # Save User Message
-    # -----------------------------------------------------
-
-    st.session_state.messages.append(
-        {
-            "role": "user",
-            "content": question
-        }
-    )
-
-
-    # -----------------------------------------------------
-    # Ask Medical Chatbot
-    #
-    # chatbot.py handles:
-    # - conversation memory
-    # - query rewriting
-    # - retrieval
-    # - answer generation
-    # - sources
-    # -----------------------------------------------------
+    # =================================
+    # Handle Question
+    # =================================
 
     with st.chat_message("assistant"):
 
         with st.spinner(
-            "Supervisor + Medical Agents are working..."
+            "Thinking..."
         ):
 
-            try:
+            # -----------------------------
+            # Retrieve medical context
+            # -----------------------------
 
-                answer, sources = ask_medical_question(
-                    question
+            docs = retriever.invoke(
+                question
+            )
+
+
+            context = "\n\n".join(
+                doc.page_content
+                for doc in docs
+            )
+
+
+            # -----------------------------
+            # Sources
+            # -----------------------------
+
+            sources = list(
+                dict.fromkeys(
+                    doc.metadata.get(
+                        "source",
+                        "Unknown"
+                    )
+                    for doc in docs
                 )
-
-                st.markdown(
-                    answer
-                )
+            )
 
 
-                # -----------------------------------------
-                # Sources
-                # -----------------------------------------
+            # -----------------------------
+            # Conversation History
+            # -----------------------------
 
-                with st.expander(
-                    "📚 Sources"
-                ):
+            history = "\n".join(
+                f"{m['role']}: {m['content']}"
+                for m in st.session_state.messages[-10:]
+            )
 
-                    if sources:
 
-                        for source in sources:
+            # -----------------------------
+            # Multi-Agent System
+            # -----------------------------
 
-                            st.write(
-                                f"- {source}"
-                            )
+            answer = run_agents(
+                question=question,
+                context=context,
+                report=st.session_state.report_text
+            )
 
-                    else:
+
+            # -----------------------------
+            # Display Answer
+            # -----------------------------
+
+            st.markdown(
+                answer
+            )
+
+
+            # -----------------------------
+            # Display Sources
+            # -----------------------------
+
+            if sources:
+
+                with st.expander("📚 Sources"):
+
+                    for source in sources:
 
                         st.write(
-                            "No sources found."
+                            f"- {source}"
                         )
 
 
-                # -----------------------------------------
-                # Save Assistant Message
-                # -----------------------------------------
+    # =================================
+    # Save Assistant Message
+    # =================================
 
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "sources": sources
-                    }
-                )
-
-
-            except Exception as e:
-
-                error_message = (
-                    f"Agent error: {e}"
-                )
-
-                st.error(
-                    error_message
-                )
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": error_message,
-                        "sources": []
-                    }
-                )
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer,
+            "sources": sources
+        }
+    )
