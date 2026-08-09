@@ -1,0 +1,41 @@
+Diabetes
+
+Diabetes is a chronic condition that affects how the body regulates blood glucose (blood sugar). After eating, food is broken down into glucose, which enters the bloodstream. Insulin helps move glucose from the blood into the body's cells, where it is used for energy or stored for future use.
+
+In people with diabetes, the body either does not produce enough insulin, cannot use insulin effectively, or both. As a result, blood glucose levels become higher than normal.
+
+Common Types of Diabetes
+
+1. Type 1 Diabetes
+Type 1 diabetes is an autoimmune disease. The immune system attacks and destroys the insulin-producing beta cells in the pancreas, preventing the body from producing enough insulin.
+
+2. Type 2 Diabetes
+Type 2 diabetes is the most common type. It develops when the body becomes resistant to insulin, meaning insulin does not work effectively. Management usually includes healthy lifestyle changes and medications.
+
+3. Gestational Diabetes
+Gestational diabetes develops during pregnancy. Blood glucose levels often return to normal after childbirth, but women who have had gestational diabetes have a higher risk of developing type 2 diabetes later in life.
+
+Blood Glucose Management
+
+Managing blood glucose is an important part of diabetes care. Keeping blood glucose within the recommended range may reduce the risk of diabetes-related complications. Understanding the factors that affect blood glucose helps individuals make informed decisions about their health.
+
+Prediabetes
+
+Prediabetes is a condition in which blood glucose levels are higher than normal but not high enough to be diagnosed as diabetes. It usually does not cause noticeable symptoms. People with prediabetes have an increased risk of developing type 2 diabetes, heart disease, and stroke.
+
+Managing Diabetes
+
+Living with diabetes requires ongoing management and support. Diabetes care may include monitoring blood glucose levels, following a healthy lifestyle, taking prescribed medications, and using diabetes technologies when recommended by healthcare professionals.
+
+Diabetes Technology
+
+Several devices are available to support diabetes management, including:
+- Continuous Glucose Monitors (CGMs)
+- Blood Glucose Meters
+- Insulin Pumps
+
+These devices help people monitor blood glucose levels and support diabetes treatment decisions.
+
+Source:
+American Diabetes Association (ADA)
+https://diabetes.org/about-diabetes
